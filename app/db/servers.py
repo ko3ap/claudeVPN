@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Optional
 
+from app.db import vpn_pool as vpn_pool_repo
 from app.db.connection import get_conn
 
 
@@ -79,4 +80,4 @@ def used_addresses(server_id: int) -> set[str]:
             "SELECT address FROM vpn_clients WHERE server_id = ? AND status != 'deleted'",
             (server_id,),
         ).fetchall()
-        return {r["address"] for r in rows}
+        return {r["address"] for r in rows} | vpn_pool_repo.used_addresses(server_id)

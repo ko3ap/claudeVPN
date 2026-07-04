@@ -9,6 +9,7 @@ from app.bot.routers.admin import admins as admin_admins
 from app.bot.routers.admin import panel as admin_panel
 from app.bot.routers.admin import pricing as admin_pricing
 from app.bot.routers.admin import servers as admin_servers
+from app.bot.routers.admin import settings as admin_settings
 from app.bot.routers.admin import users as admin_users
 from app.bot.routers.admin import changetime as admin_changetime
 from app.config import settings
@@ -27,6 +28,7 @@ def build_dispatcher() -> Dispatcher:
     dp.include_router(admin_users.router)
     dp.include_router(admin_changetime.router)
     dp.include_router(admin_servers.router)
+    dp.include_router(admin_settings.router)
 
     dp.include_router(start.router)
     dp.include_router(tariffs.router)

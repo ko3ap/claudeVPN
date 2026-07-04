@@ -6,8 +6,10 @@ import logging
 from aiogram import Bot, F, Router
 from aiogram.types import BufferedInputFile, CallbackQuery, Message
 
+from app.db import admins as admins_repo
 from app.db import payments as payments_repo
 from app.db import pricing as pricing_repo
+from app.db import settings as settings_repo
 from app.payments.poller import poll_payment
 from app.payments.yookassa_provider import yookassa_provider
 from app.services import subscription_service, texts
@@ -21,7 +23,8 @@ router = Router(name="tariffs")
 
 async def _show_tariffs(bot: Bot, chat_id: int) -> None:
     tariffs_list = pricing_repo.get_all()
-    await send_ephemeral(bot, chat_id, texts.tariffs_intro(), reply_markup=tariffs(tariffs_list))
+    trial_enabled = settings_repo.get_bool("trial_enabled", True)
+    await send_ephemeral(bot, chat_id, texts.tariffs_intro(), reply_markup=tariffs(tariffs_list, trial_enabled))
 
 
 @router.message(F.text == BTN_BUY)
@@ -45,6 +48,10 @@ async def cb_tariff_selected(callback: CallbackQuery, bot: Bot):
 
     telegram_id = callback.from_user.id
     chat_id = callback.message.chat.id
+
+    if not subscription_service.has_capacity_for(telegram_id):
+        await send_ephemeral(bot, chat_id, texts.no_capacity())
+        return
 
     try:
         link = yookassa_provider.create_payment(
@@ -82,6 +89,7 @@ async def track_payment(bot: Bot, payment_id: str, telegram_id: int, chat_id: in
             result = subscription_service.activate_purchase(telegram_id, tariff_key)
         except NoCapacityError:
             await send_persistent(bot, chat_id, texts.no_capacity())
+            await _alert_admins_no_capacity(bot, payment_id, telegram_id, tariff_key)
             return
         except Exception as e:
             logger.exception("Failed to activate purchase for user %s: %s", telegram_id, e)
@@ -111,3 +119,23 @@ async def track_payment(bot: Bot, payment_id: str, telegram_id: int, chat_id: in
         on_succeeded=on_succeeded,
         on_terminal_failure=on_terminal_failure,
     )
+
+
+async def _alert_admins_no_capacity(bot: Bot, payment_id: str, telegram_id: int, tariff_key: str) -> None:
+    """Payment succeeded but no VPN capacity was available at fulfillment — a human
+    needs to manually refund via the YooKassa dashboard or free up a slot."""
+    payment = payments_repo.get(payment_id)
+    amount = payment["amount"] if payment else "?"
+    text = (
+        "⚠️ <b>Оплата прошла, но не хватило места для подписки!</b>\n\n"
+        f"👤 Пользователь: <code>{telegram_id}</code>\n"
+        f"💳 Платёж: <code>{payment_id}</code>\n"
+        f"📦 Тариф: {tariff_key}\n"
+        f"💰 Сумма: {amount} ₽\n\n"
+        "Нужно вручную оформить возврат или освободить слот и повторно активировать подписку."
+    )
+    for admin in admins_repo.list_admins():
+        try:
+            await bot.send_message(admin["telegram_id"], text, parse_mode="HTML")
+        except Exception as e:
+            logger.warning("Failed to alert admin %s about capacity failure: %s", admin["telegram_id"], e)

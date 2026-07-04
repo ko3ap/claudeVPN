@@ -6,6 +6,7 @@ from aiogram import Bot, F, Router
 from aiogram.types import BufferedInputFile, CallbackQuery
 
 from app.config import settings
+from app.db import settings as settings_repo
 from app.services import subscription_service, texts
 from app.services.keyboards import how_to_use_button, trial_activate
 from app.services.ui import clear_ephemeral, send_ephemeral, send_persistent
@@ -18,6 +19,10 @@ router = Router(name="trial")
 @router.callback_query(F.data == "trial_offer")
 async def cb_trial_offer(callback: CallbackQuery, bot: Bot):
     await callback.answer()
+    if not settings_repo.get_bool("trial_enabled", True):
+        await send_ephemeral(bot, callback.message.chat.id, texts.trial_disabled())
+        return
+
     view = subscription_service.get_view(callback.from_user.id)
     if view["trial_used"]:
         await send_ephemeral(bot, callback.message.chat.id, texts.trial_already_used())
@@ -42,6 +47,9 @@ async def cb_trial_activate(callback: CallbackQuery, bot: Bot):
 
     try:
         result = subscription_service.activate_trial(telegram_id)
+    except subscription_service.TrialDisabledError:
+        await send_ephemeral(bot, chat_id, texts.trial_disabled())
+        return
     except subscription_service.TrialAlreadyUsedError:
         await send_ephemeral(bot, chat_id, texts.trial_already_used())
         return

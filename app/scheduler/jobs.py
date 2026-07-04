@@ -65,8 +65,16 @@ async def _sweep_purge(bot: Bot) -> None:
         logger.error("Failed to purge expired clients: %s", e)
 
 
+async def _sweep_vpn_pool_refill(bot: Bot) -> None:
+    # Several sequential blocking Docker/SSH calls — must run off the event loop
+    # so a slow refill doesn't stall message handling for unrelated users.
+    created = await asyncio.to_thread(vpn_manager.refill_pool)
+    if created:
+        logger.info("VPN key pool refilled: %s", created)
+
+
 async def run_all_sweeps(bot: Bot) -> None:
-    for sweep in (_sweep_expired, _sweep_reminders, _sweep_trial_warnings, _sweep_purge):
+    for sweep in (_sweep_expired, _sweep_reminders, _sweep_trial_warnings, _sweep_purge, _sweep_vpn_pool_refill):
         try:
             await sweep(bot)
         except Exception as e:

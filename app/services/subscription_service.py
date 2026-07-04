@@ -12,6 +12,7 @@ from typing import Optional
 
 from app.config import settings
 from app.db import pricing as pricing_repo
+from app.db import settings as settings_repo
 from app.db import subscriptions as subs_repo
 from app.vpn.manager import AcquiredClient, VpnManager, vpn_manager
 
@@ -24,6 +25,10 @@ class TrialAlreadyUsedError(RuntimeError):
 
 class AlreadySubscribedError(RuntimeError):
     """Raised when trying to start a trial while a paid subscription is already active."""
+
+
+class TrialDisabledError(RuntimeError):
+    """Raised when an admin has globally disabled the trial period."""
 
 
 @dataclass
@@ -71,6 +76,9 @@ def get_view(telegram_id: int) -> dict:
 
 
 def activate_trial(telegram_id: int, manager: VpnManager = vpn_manager) -> PurchaseResult:
+    if not settings_repo.get_bool("trial_enabled", True):
+        raise TrialDisabledError()
+
     sub = subs_repo.ensure_row(telegram_id)
     if sub["trial_used"]:
         raise TrialAlreadyUsedError()
@@ -136,3 +144,12 @@ def change_time(
 def expire_subscription(telegram_id: int, manager: VpnManager = vpn_manager) -> None:
     manager.freeze_client(telegram_id)
     subs_repo.expire(telegram_id)
+
+
+def has_capacity_for(telegram_id: int, manager: VpnManager = vpn_manager) -> bool:
+    """Pre-flight check so routers can avoid charging a user into a dead end.
+
+    Not authoritative — capacity can still change before fulfillment, which is
+    why activate_purchase/activate_trial re-check for real via acquire_client.
+    """
+    return manager.has_capacity_for(telegram_id)

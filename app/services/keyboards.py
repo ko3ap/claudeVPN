@@ -33,12 +33,13 @@ def channel_gate(channel_username: str) -> InlineKeyboardMarkup:
     )
 
 
-def tariffs(tariffs_list: list[dict]) -> InlineKeyboardMarkup:
+def tariffs(tariffs_list: list[dict], trial_enabled: bool = True) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(text=f"{t['label']} — {t['price']} ₽", callback_data=f"tariff:{t['key']}")]
         for t in tariffs_list
     ]
-    rows.append([InlineKeyboardButton(text="🎁 Пробный период", callback_data="trial_offer")])
+    if trial_enabled:
+        rows.append([InlineKeyboardButton(text="🎁 Пробный период", callback_data="trial_offer")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -83,6 +84,26 @@ def admin_panel() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="💰 Тарифы", callback_data="admin:pricing")],
             [InlineKeyboardButton(text="🔍 Найти пользователя", callback_data="admin:find")],
             [InlineKeyboardButton(text="👑 Администраторы", callback_data="admin:admins")],
+            [InlineKeyboardButton(text="⚙️ Настройки", callback_data="admin:settings")],
+        ]
+    )
+
+
+def admin_settings(settings: dict) -> InlineKeyboardMarkup:
+    trial_label = "✅ Пробный период: включен" if settings["trial_enabled"] else "❌ Пробный период: выключен"
+    pool_label = "✅ Автогенерация ключей: включена" if settings["vpn_pool_enabled"] else "❌ Автогенерация ключей: выключена"
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=trial_label, callback_data="admin:settings:trial:toggle")],
+            [InlineKeyboardButton(text=pool_label, callback_data="admin:settings:pool:toggle")],
+            [InlineKeyboardButton(text=f"Резерв ключей: {settings['vpn_pool_buffer_size']}", callback_data="noop")],
+            [
+                InlineKeyboardButton(text="−5", callback_data="admin:settings:pool:buffer:-5"),
+                InlineKeyboardButton(text="−1", callback_data="admin:settings:pool:buffer:-1"),
+                InlineKeyboardButton(text="+1", callback_data="admin:settings:pool:buffer:1"),
+                InlineKeyboardButton(text="+5", callback_data="admin:settings:pool:buffer:5"),
+            ],
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="admin:back")],
         ]
     )
 

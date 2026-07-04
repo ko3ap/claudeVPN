@@ -6,6 +6,7 @@ from aiogram.types import Message
 
 from app.bot.routers.admin.guards import ensure_admin
 from app.services import subscription_service
+from app.vpn.manager import NoCapacityError
 
 router = Router(name="admin_changetime")
 
@@ -30,7 +31,14 @@ async def cmd_changetime(message: Message):
         await message.answer("chat_id и дни должны быть целыми числами.")
         return
 
-    new_expiry = subscription_service.change_time(target_id, delta_days)
+    try:
+        new_expiry = subscription_service.change_time(target_id, delta_days)
+    except NoCapacityError:
+        await message.answer(
+            f"❌ Не удалось изменить время пользователю {target_id}: нет свободных мест на серверах VPN. "
+            "Добавьте сервер или освободите слот и повторите."
+        )
+        return
 
     if new_expiry is None:
         await message.answer(f"✅ Подписка пользователя {target_id} завершена.")

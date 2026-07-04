@@ -132,6 +132,13 @@ def already_subscribed() -> str:
     return "У тебя уже есть активная подписка — пробный период сейчас не нужен 😉"
 
 
+def trial_disabled() -> str:
+    return (
+        "🙁 <b>Пробный период временно недоступен</b>\n\n"
+        f"Если есть вопросы — напиши в поддержку: @{settings.support_username}"
+    )
+
+
 def trial_activated(trial_days: int) -> str:
     return f"✅ <b>Пробный период активирован на {trial_days} дня!</b>\n\nЛови ключ 👇"
 

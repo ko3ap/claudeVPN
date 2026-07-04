@@ -85,7 +85,29 @@ CREATE TABLE IF NOT EXISTS ephemeral_messages (
     chat_id    INTEGER PRIMARY KEY,
     message_id INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS app_settings (
+    key        TEXT PRIMARY KEY,
+    value      TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS vpn_key_pool (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    server_id   INTEGER NOT NULL REFERENCES vpn_servers(id),
+    private_key TEXT NOT NULL,
+    public_key  TEXT NOT NULL,
+    address     TEXT NOT NULL,
+    created_at  TEXT NOT NULL,
+    UNIQUE(server_id, address)
+);
 """
+
+_DEFAULT_SETTINGS = {
+    "trial_enabled": "1",
+    "vpn_pool_enabled": "1",
+    "vpn_pool_buffer_size": "5",
+}
 
 
 def _seed_tariffs(conn: sqlite3.Connection) -> None:
@@ -111,9 +133,21 @@ def _seed_main_admin(conn: sqlite3.Connection) -> None:
     )
 
 
+def _seed_settings(conn: sqlite3.Connection) -> None:
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc).isoformat()
+    for key, value in _DEFAULT_SETTINGS.items():
+        conn.execute(
+            "INSERT OR IGNORE INTO app_settings (key, value, updated_at) VALUES (?, ?, ?)",
+            (key, value, now),
+        )
+
+
 def init_db() -> None:
     with get_conn() as conn:
         conn.executescript(_TABLES)
         _seed_tariffs(conn)
         _seed_main_admin(conn)
+        _seed_settings(conn)
     logger.info("Database initialized at %s", settings.db_path)
