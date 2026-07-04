@@ -26,32 +26,15 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     reminder_last_sent_date TEXT
 );
 
-CREATE TABLE IF NOT EXISTS vpn_servers (
-    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
-    name               TEXT NOT NULL,
-    docker_host        TEXT NOT NULL,   -- e.g. ssh://user@1.2.3.4 or unix:///var/run/docker.sock
-    container_name     TEXT NOT NULL,
-    interface_name     TEXT NOT NULL DEFAULT 'wg0',
-    endpoint           TEXT NOT NULL,   -- host:port advertised to clients
-    server_public_key  TEXT NOT NULL,
-    subnet_cidr        TEXT NOT NULL,   -- e.g. 10.8.0.0/24 (client addresses allocated from here)
-    dns                TEXT NOT NULL DEFAULT '1.1.1.1',
-    extra_conf         TEXT NOT NULL DEFAULT '',
-    max_clients        INTEGER NOT NULL DEFAULT 40,
-    priority           INTEGER NOT NULL DEFAULT 100,
-    enabled            INTEGER NOT NULL DEFAULT 1
-);
-
 CREATE TABLE IF NOT EXISTS vpn_clients (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     telegram_id  INTEGER NOT NULL UNIQUE REFERENCES users(telegram_id),
-    server_id    INTEGER REFERENCES vpn_servers(id),
     private_key  TEXT NOT NULL,
     public_key   TEXT NOT NULL,
     address      TEXT NOT NULL,
     status       TEXT NOT NULL DEFAULT 'active', -- active|frozen|deleted
-    managed      INTEGER NOT NULL DEFAULT 1,      -- 0 = legacy/imported, not under Docker lifecycle control
-    legacy_conf_text TEXT,                        -- raw conf/key text for unmanaged legacy imports (server_id NULL)
+    managed      INTEGER NOT NULL DEFAULT 1,      -- 0 = legacy/imported, not under the VPN lifecycle
+    legacy_conf_text TEXT,                        -- raw conf/key text for unmanaged legacy imports
     created_at   TEXT NOT NULL,
     frozen_at    TEXT
 );
@@ -94,12 +77,10 @@ CREATE TABLE IF NOT EXISTS app_settings (
 
 CREATE TABLE IF NOT EXISTS vpn_key_pool (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    server_id   INTEGER NOT NULL REFERENCES vpn_servers(id),
     private_key TEXT NOT NULL,
     public_key  TEXT NOT NULL,
-    address     TEXT NOT NULL,
-    created_at  TEXT NOT NULL,
-    UNIQUE(server_id, address)
+    address     TEXT NOT NULL UNIQUE,
+    created_at  TEXT NOT NULL
 );
 """
 
@@ -144,9 +125,55 @@ def _seed_settings(conn: sqlite3.Connection) -> None:
         )
 
 
+def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    return {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+
+
+def _migrate_drop_multi_server(conn: sqlite3.Connection) -> None:
+    """The multi-server architecture (vpn_servers + server_id on vpn_clients/vpn_key_pool)
+    was replaced by a single native WireGuard interface on this host. Renames any
+    old-shape tables out of the way so the CREATE TABLE IF NOT EXISTS statements below
+    can (re)create them in the new shape, then copies over any existing rows.
+    """
+    existing_tables = {
+        row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+    }
+
+    if "vpn_clients" in existing_tables and "server_id" in _table_columns(conn, "vpn_clients"):
+        conn.execute("ALTER TABLE vpn_clients RENAME TO vpn_clients_old")
+        conn.executescript(_TABLES)  # recreates vpn_clients in the new shape (and any other missing tables)
+        conn.execute(
+            """
+            INSERT INTO vpn_clients
+                (id, telegram_id, private_key, public_key, address, status, managed, legacy_conf_text, created_at, frozen_at)
+            SELECT id, telegram_id, private_key, public_key, address, status, managed, legacy_conf_text, created_at, frozen_at
+            FROM vpn_clients_old
+            """
+        )
+        conn.execute("DROP TABLE vpn_clients_old")
+        logger.info("Migrated vpn_clients: dropped server_id column")
+
+    if "vpn_key_pool" in existing_tables and "server_id" in _table_columns(conn, "vpn_key_pool"):
+        conn.execute("ALTER TABLE vpn_key_pool RENAME TO vpn_key_pool_old")
+        conn.executescript(_TABLES)
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO vpn_key_pool (id, private_key, public_key, address, created_at)
+            SELECT id, private_key, public_key, address, created_at FROM vpn_key_pool_old
+            """
+        )
+        conn.execute("DROP TABLE vpn_key_pool_old")
+        logger.info("Migrated vpn_key_pool: dropped server_id column")
+
+    if "vpn_servers" in existing_tables:
+        conn.execute("DROP TABLE vpn_servers")
+        logger.info("Dropped vpn_servers table (multi-server support removed)")
+
+
 def init_db() -> None:
     with get_conn() as conn:
         conn.executescript(_TABLES)
+        _migrate_drop_multi_server(conn)
         _seed_tariffs(conn)
         _seed_main_admin(conn)
         _seed_settings(conn)

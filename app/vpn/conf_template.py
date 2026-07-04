@@ -1,21 +1,19 @@
-"""Renders a client-facing WireGuard .conf file from server + client records."""
+"""Renders a client-facing WireGuard .conf file for the single VPN server."""
 from __future__ import annotations
 
+from app.config import settings
 
-def render_client_conf(*, server: dict, private_key: str, address: str) -> str:
-    extra = server.get("extra_conf") or ""
-    if extra and not extra.startswith("\n"):
-        extra = "\n" + extra
+
+def render_client_conf(*, private_key: str, address: str) -> str:
     return (
         "[Interface]\n"
         f"PrivateKey = {private_key}\n"
         f"Address = {address}/32\n"
-        f"DNS = {server['dns']}"
-        f"{extra}\n"
+        f"DNS = {settings.vpn_dns}\n"
         "\n"
         "[Peer]\n"
-        f"PublicKey = {server['server_public_key']}\n"
-        f"Endpoint = {server['endpoint']}\n"
+        f"PublicKey = {settings.vpn_server_public_key}\n"
+        f"Endpoint = {settings.vpn_endpoint}\n"
         "AllowedIPs = 0.0.0.0/0, ::/0\n"
         "PersistentKeepalive = 25\n"
     )

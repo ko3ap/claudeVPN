@@ -102,8 +102,28 @@ class Settings:
         default_factory=lambda: _env_int("PAYMENT_POLL_TIMEOUT_SECONDS", 1800)
     )
 
-    default_max_clients_per_server: int = field(
-        default_factory=lambda: _env_int("DEFAULT_MAX_CLIENTS_PER_SERVER", 40)
+    # Single VPN server — a native WireGuard interface on this same host,
+    # managed directly via wireguard-tools (no Docker, no multi-server pool).
+    vpn_interface: str = field(
+        default_factory=lambda: os.environ.get("VPN_INTERFACE", "wg1")
+    )
+    vpn_server_address: str = field(
+        default_factory=lambda: os.environ.get("VPN_SERVER_ADDRESS", "10.10.0.1")
+    )
+    vpn_endpoint: str = field(
+        default_factory=lambda: os.environ.get("VPN_ENDPOINT", "")
+    )
+    vpn_server_public_key: str = field(
+        default_factory=lambda: os.environ.get("VPN_SERVER_PUBLIC_KEY", "")
+    )
+    vpn_subnet_cidr: str = field(
+        default_factory=lambda: os.environ.get("VPN_SUBNET_CIDR", "10.10.0.0/24")
+    )
+    vpn_dns: str = field(
+        default_factory=lambda: os.environ.get("VPN_DNS", "8.8.8.8")
+    )
+    vpn_max_clients: int = field(
+        default_factory=lambda: _env_int("VPN_MAX_CLIENTS", 200)
     )
 
     require_channel_subscription: bool = field(

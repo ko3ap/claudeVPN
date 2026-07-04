@@ -9,7 +9,6 @@ from aiogram.types import CallbackQuery, Message
 
 from app.bot.routers.admin.guards import ensure_admin
 from app.bot.states import AdminStates
-from app.db import servers as servers_repo
 from app.db import subscriptions as subs_repo
 from app.db import users as users_repo
 from app.db import vpn_clients as clients_repo
@@ -58,10 +57,8 @@ def _format_profile(telegram_id: int) -> str:
         lines.append(f"Истекает: {exp}")
 
     if client:
-        server = servers_repo.get_server(client["server_id"]) if client["server_id"] else None
-        server_name = server["name"] if server else "(нет / устаревший)"
         lines.append(
-            f"\n🔑 VPN-клиент: статус <b>{client['status']}</b>, сервер: {server_name}, адрес: {client['address']}"
+            f"\n🔑 VPN-клиент: статус <b>{client['status']}</b>, адрес: {client['address']}"
         )
     else:
         lines.append("\n🔑 VPN-клиент не выдавался.")

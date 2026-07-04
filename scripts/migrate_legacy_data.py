@@ -12,11 +12,9 @@ What it does:
     safer assumption) and use the old flag only to mark `trial_used`, so
     nobody gets a second free trial they've effectively already had.
   - If a user has a real WireGuard key stored (old `users.vpn_key`), it's
-    imported as an *unmanaged* legacy vpn_clients row (server_id=NULL,
-    managed=0) — the physical key keeps working, but this bot won't try to
-    freeze/reactivate it via Docker since it doesn't know which physical
-    server it lives on. Once you register that server with /addserver, an
-    admin can migrate the user onto managed infrastructure by hand if needed.
+    imported as an *unmanaged* legacy vpn_clients row (managed=0) — the
+    physical key keeps working, but this bot won't try to freeze/reactivate
+    it since it wasn't created on this bot's own WireGuard interface.
   - Safe to re-run: any user who already has a non-'none' subscription in the
     new database is skipped rather than overwritten.
 """
@@ -95,7 +93,6 @@ def migrate() -> None:
                     public_key = public_key_from_private(private_key)
                     client = clients_repo.create(
                         telegram_id=telegram_id,
-                        server_id=None,
                         private_key=private_key,
                         public_key=public_key,
                         address=address,

@@ -8,5 +8,3 @@ def setup_logging(level: int = logging.INFO) -> None:
     )
     # Silence noisy third-party loggers unless something goes wrong.
     logging.getLogger("aiogram.event").setLevel(logging.WARNING)
-    logging.getLogger("paramiko").setLevel(logging.WARNING)
-    logging.getLogger("docker").setLevel(logging.WARNING)

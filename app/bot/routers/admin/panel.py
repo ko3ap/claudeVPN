@@ -4,8 +4,9 @@ from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, Message
 
-from app.db import servers as servers_repo
+from app.config import settings
 from app.db import subscriptions as subs_repo
+from app.db import vpn_clients as clients_repo
 from app.services.keyboards import BTN_ADMIN, admin_panel
 from app.bot.routers.admin.guards import ensure_admin
 
@@ -13,17 +14,13 @@ router = Router(name="admin_panel")
 
 
 def _stats_text() -> str:
-    servers = servers_repo.list_servers(enabled_only=False)
     active_users = subs_repo.get_active_users()
-
-    total_capacity = sum(s["max_clients"] for s in servers if s["enabled"])
-    total_occupied = sum(servers_repo.count_occupied_slots(s["id"]) for s in servers if s["enabled"])
+    total_occupied = clients_repo.count_occupied_slots()
 
     lines = [
         "⚙️ <b>Панель администратора</b>\n",
         f"👥 Активных подписок: <b>{len(active_users)}</b>",
-        f"🖥 Серверов включено: <b>{sum(1 for s in servers if s['enabled'])}</b> из {len(servers)}",
-        f"📦 Занято слотов: <b>{total_occupied}</b> из {total_capacity}",
+        f"📦 Занято слотов: <b>{total_occupied}</b> из {settings.vpn_max_clients}",
     ]
     return "\n".join(lines)
 

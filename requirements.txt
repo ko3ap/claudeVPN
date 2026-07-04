@@ -1,6 +1,4 @@
 aiogram==3.13.1
 yookassa==3.10.0
-docker==7.1.0
-paramiko==3.5.0
 cryptography==43.0.3
 python-dotenv==1.0.1

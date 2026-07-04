@@ -17,7 +17,6 @@ def get_by_user(telegram_id: int) -> Optional[dict]:
 def create(
     *,
     telegram_id: int,
-    server_id: Optional[int],
     private_key: str,
     public_key: str,
     address: str,
@@ -29,12 +28,27 @@ def create(
         conn.execute(
             """
             INSERT INTO vpn_clients
-                (telegram_id, server_id, private_key, public_key, address, status, managed, legacy_conf_text, created_at)
-            VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?)
+                (telegram_id, private_key, public_key, address, status, managed, legacy_conf_text, created_at)
+            VALUES (?, ?, ?, ?, 'active', ?, ?, ?)
             """,
-            (telegram_id, server_id, private_key, public_key, address, int(managed), legacy_conf_text, now),
+            (telegram_id, private_key, public_key, address, int(managed), legacy_conf_text, now),
         )
     return get_by_user(telegram_id)
+
+
+def count_occupied_slots() -> int:
+    """Active + frozen clients occupy a slot; frozen ones keep their reserved config for 10 days."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) AS n FROM vpn_clients WHERE status IN ('active', 'frozen')"
+        ).fetchone()
+        return row["n"]
+
+
+def used_addresses() -> set[str]:
+    with get_conn() as conn:
+        rows = conn.execute("SELECT address FROM vpn_clients WHERE status != 'deleted'").fetchall()
+        return {r["address"] for r in rows}
 
 
 def mark_frozen(telegram_id: int) -> None:

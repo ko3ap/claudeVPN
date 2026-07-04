@@ -1,15 +1,12 @@
-"""WireGuardHost — talks to a single VPN server's Docker daemon (local socket or
-remote over SSH, e.g. base_url='ssh://user@1.2.3.4') to create/enable/disable
-WireGuard peers on an AmneziaWG/WireGuard container.
-
-Modeled after egor/vpn.py's disconnect_peer (docker-exec + iptables DROP), but
-generalized to any server's docker host and extended with peer creation, which
-egor's pool-of-pre-made-.conf approach never needed.
+"""Talks to the single native WireGuard interface on this host via wireguard-tools
+(wg / wg-quick), run locally as root — no Docker, no SSH, since the bot process
+already runs directly on the same machine as the VPN server.
 """
 from __future__ import annotations
 
 import base64
 import logging
+import subprocess
 
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
 from cryptography.hazmat.primitives.serialization import (
@@ -18,6 +15,8 @@ from cryptography.hazmat.primitives.serialization import (
     PrivateFormat,
     PublicFormat,
 )
+
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -39,87 +38,60 @@ def public_key_from_private(private_key_b64: str) -> str:
 
 
 class WireGuardHostError(RuntimeError):
-    """Raised when a WireGuard/Docker operation against a server fails outright."""
+    """Raised when a local wg/iptables operation fails outright."""
 
 
-class WireGuardHost:
-    """Docker-exec operations against one VPN server's WireGuard container."""
-
-    def __init__(self, docker_host: str, container_name: str, interface_name: str):
-        self.docker_host = docker_host
-        self.container_name = container_name
-        self.interface_name = interface_name
-
-    def _container(self):
-        import docker
-
-        client = docker.DockerClient(base_url=self.docker_host)
-        return client.containers.get(self.container_name)
-
-    def _exec(self, container, cmd: list[str]):
-        result = container.exec_run(cmd, user="root", privileged=True)
-        if result.exit_code != 0:
-            raise WireGuardHostError(
-                f"`{' '.join(cmd)}` failed (exit={result.exit_code}): "
-                f"{result.output.decode(errors='ignore').strip()}"
-            )
-        return result
-
-    def _persist(self, container) -> None:
-        """Best-effort: save the running WG state to disk so it survives a container restart.
-        Non-fatal — the live change has already been applied at this point.
-        """
-        try:
-            self._exec(container, ["wg-quick", "save", self.interface_name])
-        except Exception as e:
-            logger.warning("wg-quick save failed on %s: %s", self.container_name, e)
-
-    def add_peer(self, public_key: str, address: str) -> None:
-        """Add (or re-add, for reactivation) a peer with a fixed client address."""
-        try:
-            container = self._container()
-            self._exec(
-                container,
-                ["wg", "set", self.interface_name, "peer", public_key,
-                 "allowed-ips", f"{address}/32"],
-            )
-            self._persist(container)
-            logger.info("Peer added: %s -> %s on %s", public_key[:12], address, self.container_name)
-        except WireGuardHostError:
-            raise
-        except Exception as e:
-            raise WireGuardHostError(f"add_peer failed: {e}") from e
-
-    def remove_peer(self, public_key: str, address: str | None = None) -> bool:
-        """Remove a peer and drop its in-flight traffic immediately.
-
-        Returns True on success, False on any error (non-fatal — callers treat
-        this as best-effort so scheduled sweeps keep going for other users).
-        """
-        try:
-            container = self._container()
-            if address:
-                for chain in ("FORWARD", "INPUT"):
-                    try:
-                        container.exec_run(
-                            ["iptables", "-I", chain, "-s", address, "-j", "DROP"],
-                            user="root",
-                            privileged=True,
-                        )
-                    except Exception as e:
-                        logger.warning("iptables DROP failed for %s on %s: %s", address, chain, e)
-            self._exec(container, ["wg", "set", self.interface_name, "peer", public_key, "remove"])
-            self._persist(container)
-            logger.info("Peer removed: %s on %s", public_key[:12], self.container_name)
-            return True
-        except Exception as e:
-            logger.error("remove_peer failed for %s: %s", public_key[:12], e)
-            return False
+def _run(cmd: list[str]) -> subprocess.CompletedProcess:
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise WireGuardHostError(
+            f"`{' '.join(cmd)}` failed (exit={result.returncode}): {result.stderr.strip()}"
+        )
+    return result
 
 
-def host_for_server(server: dict) -> WireGuardHost:
-    return WireGuardHost(
-        docker_host=server["docker_host"],
-        container_name=server["container_name"],
-        interface_name=server["interface_name"],
-    )
+def _save() -> None:
+    """Best-effort: persist the running WG state to disk so it survives a restart.
+    Non-fatal — the live change has already been applied at this point.
+    """
+    try:
+        _run(["wg-quick", "save", settings.vpn_interface])
+    except Exception as e:
+        logger.warning("wg-quick save failed for %s: %s", settings.vpn_interface, e)
+
+
+def add_peer(public_key: str, address: str) -> None:
+    """Add (or re-add, for reactivation) a peer with a fixed client address."""
+    try:
+        _run(["wg", "set", settings.vpn_interface, "peer", public_key, "allowed-ips", f"{address}/32"])
+        _save()
+        logger.info("Peer added: %s -> %s on %s", public_key[:12], address, settings.vpn_interface)
+    except WireGuardHostError:
+        raise
+    except Exception as e:
+        raise WireGuardHostError(f"add_peer failed: {e}") from e
+
+
+def remove_peer(public_key: str, address: str | None = None) -> bool:
+    """Remove a peer and drop its in-flight traffic immediately.
+
+    Returns True on success, False on any error (non-fatal — callers treat
+    this as best-effort so scheduled sweeps keep going for other users).
+    """
+    try:
+        if address:
+            for chain in ("FORWARD", "INPUT"):
+                try:
+                    subprocess.run(
+                        ["iptables", "-I", chain, "-s", address, "-j", "DROP"],
+                        capture_output=True, text=True,
+                    )
+                except Exception as e:
+                    logger.warning("iptables DROP failed for %s on %s: %s", address, chain, e)
+        _run(["wg", "set", settings.vpn_interface, "peer", public_key, "remove"])
+        _save()
+        logger.info("Peer removed: %s on %s", public_key[:12], settings.vpn_interface)
+        return True
+    except Exception as e:
+        logger.error("remove_peer failed for %s: %s", public_key[:12], e)
+        return False
